@@ -107,14 +107,16 @@ def analyze(data: dict, cfg: dict, counter: Counter, include_names: bool = False
         notes.append("large_server_instructions_review")
     # Stable across server ordering changes; metadata included for contract-drift detection.
     ordered = sorted(enabled, key=lambda t: t["name"])
+    core_tokens = counter.json(schemas)
+    instruction_tokens = counter.text(instructions)
     return {
         "status": "measured",
         "encoding": counter.encoding,
         "advertised_tools": len(tools),
         "selected_tools": len(enabled),
-        "instructions_tokens": counter.text(instructions),
-        "core_tools_tokens": counter.json(schemas),
-        "eager_projection_tokens": counter.json(schemas) + counter.text(instructions),
+        "instructions_tokens": instruction_tokens,
+        "core_tools_tokens": core_tokens,
+        "eager_projection_tokens": core_tokens + instruction_tokens,
         "selected_wire_catalog_tokens": counter.json(ordered),
         "fingerprint": hashlib.sha256(
             canonical({"tools": ordered, "instructions": instructions}).encode()

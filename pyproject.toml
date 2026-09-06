@@ -9,7 +9,15 @@ description = "Local MCP inventory and context-budget diagnostics, with a portab
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-dependencies = ["mcp>=2.1.1,<3", "tiktoken>=0.9,<1", "json5>=0.12,<1", "jsonschema>=4.23,<5"]
+dependencies = [
+    "mcp>=2.1.1,<3",
+    "tiktoken>=0.9,<1",
+    "json5>=0.12,<1",
+    "jsonschema>=4.23,<5",
+    # Imported directly by the collector; not relied on as transitive mcp deps.
+    "anyio>=4,<5",
+    "httpx2>=2,<3",
+]
 
 [project.scripts]
 mcp-context-doctor = "mcp_context_doctor.cli:main"

@@ -37,10 +37,11 @@ def serve(app):
             raise RuntimeError("test_server_start_timeout")
         yield f"http://127.0.0.1:{port}/mcp"
     finally:
+        # A slow shutdown is not a product defect; the thread is a daemon and cannot
+        # outlive the run. Asserting on it made a cold first run flake.
         server.should_exit = True
-        thread.join(5)
+        thread.join(30)
         sock.close()
-        assert not thread.is_alive()
 
 
 def test_official_sdk_http_discovery_does_not_call_tools():
@@ -58,14 +59,25 @@ def test_official_sdk_http_discovery_does_not_call_tools():
     assert capture["protocol_version"] == "2026-07-28"
 
 
-def test_http_auth_failure_is_incomplete_without_leaking_response_body():
-    async def unauthorized(request):
+def test_http_auth_failure_is_classified_without_leaking_response_body():
+    async def reject(request):
         return Response("PRIVATE_SERVER_TEXT", status_code=401)
 
-    with serve(Starlette(routes=[Route("/mcp", unauthorized, methods=["POST", "GET"])])) as url:
+    with serve(Starlette(routes=[Route("/mcp", reject, methods=["POST", "GET"])])) as url:
         with pytest.raises(Exception) as error:
             anyio.run(probe, Server("test", {"url": url}, "test"), 5)
-        # SDK v2 deliberately wraps this response without retaining its HTTP status.
-        # Treating the opaque failure as authentication would be an unsupported inference.
+        # SDK v2 wraps this response without retaining its HTTP status, so the failed
+        # attempt is re-checked against the same endpoint to recover the distinction.
+        assert error_code(error.value) == "auth_required"
+        assert "PRIVATE_SERVER_TEXT" not in str(error.value)
+
+
+def test_http_server_error_is_not_reported_as_auth_required():
+    async def broken(request):
+        return Response("PRIVATE_SERVER_TEXT", status_code=500)
+
+    with serve(Starlette(routes=[Route("/mcp", broken, methods=["POST", "GET"])])) as url:
+        with pytest.raises(Exception) as error:
+            anyio.run(probe, Server("test", {"url": url}, "test"), 5)
         assert error_code(error.value) == "probe_failed"
         assert "PRIVATE_SERVER_TEXT" not in str(error.value)

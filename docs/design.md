@@ -10,7 +10,7 @@ Static mode never launches servers. Live mode selects configured commands/URLs a
 
 ## Scope and precedence
 
-Codex TOML, Claude/Cursor `mcpServers`, and VS Code `servers` mappings are accepted. JSON comments and trailing commas are supported through json5. Known local paths are inspected; `--config` supports other exported mappings and plugin `.mcp.json` files. Claude Code project-local entries in `.claude.json` are selected for the explicit project.
+Codex TOML, Claude/Cursor `mcpServers`, and VS Code `servers` mappings are accepted. JSON comments and trailing commas are supported through json5. An empty config file is an empty inventory, not an unreadable one; hosts create the file before anything is configured. Editor-predefined variables (`${workspaceFolder}`, `${workspaceFolderBasename}`, `${userHome}`, `${pathSeparator}`) resolve from the selected project. `${input:...}` has no known value outside the editor and stays unresolved. Known local paths are inspected; `--config` supports other exported mappings and plugin `.mcp.json` files. Claude Code project-local entries in `.claude.json` are selected for the explicit project.
 
 Files/scopes remain independent. A global entry and project entry with the same name do not prove two tools are loaded. A repeated endpoint is a review hint. We do not implement a speculative universal merge policy. Plugin enablement, managed settings, profile overrides, OAuth stores, host trust gates, and remote host configuration need host-specific evidence. Missing coverage appears in every scan report.
 
@@ -31,11 +31,11 @@ Files/scopes remain independent. A global entry and project entry with the same 
 
 The budget formula is `context_window - reserved_tokens - eager_projection_tokens`. A negative value is an exceeded **user-supplied scenario budget**, not an observed overflow. There is no universal 10-server / 50-tool danger threshold. The 1,000-token definition/instructions finding is a configurable-in-code review heuristic, not a model limit.
 
-Reports omit raw config, URLs, commands, arguments, environment values, instructions, schema bodies, and exception text. Server/tool names are hashed unless `--include-names` is requested. Hashes support local correlation; they are pseudonyms, not a promise of anonymity.
+Reports omit raw config, URLs, commands, arguments, environment values, instructions, schema bodies, and exception text. `DOCTOR_DEBUG` prints a traceback for local debugging; it can disclose configuration values and server output and is never on by default. Server/tool names are hashed unless `--include-names` is requested. Hashes support local correlation; they are pseudonyms, not a promise of anonymity.
 
 ## Failure behavior
 
-Missing, disabled, malformed, unsupported, timeout, and failed discovery states are not counted as zero measured cost. Incomplete groups remain incomplete. A live scan with missing measurements exits 2. Budget exit 3 takes precedence when the measured portion already exceeds its supplied budget. Static exit 0 means the command completed, not that the host is healthy.
+Missing, disabled, malformed, unsupported, timeout, and failed discovery states are not counted as zero measured cost. SDK v2 reports a rejected HTTP handshake as an opaque error without its status, so a failed HTTP attempt is re-checked once against the same endpoint to separate `auth_required` from `probe_failed`. Only the status line is read; the body is discarded. That check runs after the failed attempt has unwound and never on a timeout. Incomplete groups remain incomplete. A live scan with missing measurements exits 2. Budget exit 3 takes precedence when the measured portion already exceeds its supplied budget. Static exit 0 means the command completed, not that the host is healthy.
 
 Tool pagination uses opaque cursors, rejects cycles, and limits page count, tool count, and retained serialized catalog size. The catalog byte check occurs after the SDK decodes a page. It is not an OS-level memory cap or protection against hostile binaries. The timeout uses AnyIO cancellation plus SDK cleanup; it is not a full sandbox. Run untrusted targets in an OS/container sandbox or use offline captures.
 

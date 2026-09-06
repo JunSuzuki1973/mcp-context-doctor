@@ -511,6 +511,8 @@ name = "mcp-context-doctor"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "anyio" },
+    { name = "httpx2" },
     { name = "json5" },
     { name = "jsonschema" },
     { name = "mcp" },
@@ -527,6 +529,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anyio", specifier = ">=4,<5" },
+    { name = "httpx2", specifier = ">=2,<3" },
     { name = "json5", specifier = ">=0.12,<1" },
     { name = "jsonschema", specifier = ">=4.23,<5" },
     { name = "mcp", specifier = ">=2.1.1,<3" },

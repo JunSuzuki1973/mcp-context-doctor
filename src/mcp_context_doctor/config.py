@@ -27,6 +27,11 @@ def read_data(path: Path) -> dict:
     if len(raw) > MAX_FILE_BYTES:
         raise ValueError("file_too_large")
     text = raw.decode("utf-8-sig")
+    # Hosts create an empty config file before anything is configured. That is an
+    # empty inventory, not an unreadable file; reporting it as invalid would flag a
+    # healthy machine as having incomplete coverage.
+    if not text.strip():
+        return {}
     data = tomllib.loads(text) if path.suffix == ".toml" else json5.loads(text)
     if not isinstance(data, dict):
         raise ValueError("expected_object")
@@ -42,6 +47,7 @@ class Server:
     scope: str = "explicit"
     enabled: bool = True
     notes: list[str] = field(default_factory=list)
+    variables: dict[str, str] = field(default_factory=dict)
 
     @property
     def key(self) -> str:
@@ -86,6 +92,10 @@ def parse_config(path: Path, host: str = "generic", project: Path | None = None)
     data = read_data(path)
     source = str(path.resolve())
     rows: list[Server] = []
+    # Editor-predefined variables are resolved from the selected project, not the
+    # environment. Without them a VS Code entry using ${workspaceFolder} is reported
+    # as unresolved even though its value is known.
+    predefined = predefined_variables(project)
     if path.suffix == ".toml":
         host = "codex" if host == "generic" else host
     mappings = [
@@ -107,7 +117,7 @@ def parse_config(path: Path, host: str = "generic", project: Path | None = None)
             enabled = (
                 cfg.get("enabled", True) is not False and cfg.get("disabled", False) is not True
             )
-            row = Server(str(name), cfg, source, host, scope, enabled)
+            row = Server(str(name), cfg, source, host, scope, enabled, variables=predefined)
             if row.transport == "stdio" and project:
                 # Launch in the selected project, not the doctor's own checkout.
                 cfg = dict(cfg)
@@ -130,6 +140,15 @@ def parse_config(path: Path, host: str = "generic", project: Path | None = None)
                 row.notes.append("configured_values_omitted_from_report")
             rows.append(row)
     return rows
+
+
+def predefined_variables(project: Path | None) -> dict[str, str]:
+    values = {"userHome": str(Path.home()), "pathSeparator": os.sep}
+    if project is not None:
+        resolved = project.resolve()
+        values["workspaceFolder"] = str(resolved)
+        values["workspaceFolderBasename"] = resolved.name
+    return values
 
 
 def candidates(home: Path, project: Path, appdata: Path | None = None) -> list[tuple[str, Path]]:

@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sys
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -109,13 +110,19 @@ async def scan(args) -> dict:
         if args.host != "all":
             paths = [(host, path) for host, path in paths if host == args.host]
     servers, sources = inventory(paths, args.project)
+    selector_notes = []
     if args.server:
         unmatched = set(args.server) - {x for s in servers for x in (s.name, s.key)}
         if unmatched:
             raise ValueError("server_selector_not_found")
+        # A configured name is not unique across scopes. Selecting by name can start
+        # more endpoints than the caller named, so say so before --live acts on it.
+        for selector in args.server:
+            if sum(1 for s in servers if s.name == selector) > 1:
+                selector_notes.append("name_selector_matched_multiple_scopes")
         servers = [s for s in servers if s.name in args.server or s.key in args.server]
     report = base(args)
-    report["coverage"] = COVERAGE
+    report["coverage"] = COVERAGE + sorted(set(selector_notes))
     report["sources"] = sources
     report["mode"] = "live-discovery" if args.live else "static"
     counter = Counter(args.encoding) if args.live else None
@@ -203,7 +210,7 @@ def markdown(report: dict) -> str:
     lines = [
         "# MCP Context Doctor",
         "",
-        f"Mode: {report['mode']} · Encoding: {report['encoding']}",
+        f"Mode: {report['mode']} | Encoding: {report['encoding']}",
         "",
         "Actual host context usage: **unknown**. Token figures below are eager-loading projections.",
         "",
@@ -213,7 +220,7 @@ def markdown(report: dict) -> str:
     for row in report["servers"]:
         m = row["measurement"]
         lines.append(
-            f"| {safe(row.get('name', row['id']))} | {row['host']} | {m['status']} | {m.get('selected_tools', '—')} | {m.get('eager_projection_tokens', '—')} |"
+            f"| {safe(row.get('name', row['id']))} | {row['host']} | {m['status']} | {m.get('selected_tools', '-')} | {m.get('eager_projection_tokens', '-')} |"
         )
     lines += ["", "## Findings", ""]
     for source in report.get("sources", []):
@@ -248,6 +255,12 @@ def markdown(report: dict) -> str:
 
 
 def main(argv=None) -> int:
+    # A console that cannot encode a character must not turn a valid report into a
+    # failure; report names are attacker-influenced text and consoles are not UTF-8
+    # everywhere. Lossy rendering is preferred over an unencodable crash.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
     p = parser()
     args = p.parse_args(argv)
     if args.action != "diff":
@@ -305,6 +318,10 @@ def main(argv=None) -> int:
         return 0
     except Exception as exc:
         # Never echo an exception that may contain raw config values or server text.
+        # DOCTOR_DEBUG opts a local operator into the traceback; it can disclose
+        # configuration values and server output, so it is never on by default.
+        if os.environ.get("DOCTOR_DEBUG"):
+            traceback.print_exc()
         print(
             json.dumps({"error": "invalid_input_or_environment", "type": type(exc).__name__}),
             file=sys.stderr,

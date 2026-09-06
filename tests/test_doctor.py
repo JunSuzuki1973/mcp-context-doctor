@@ -16,6 +16,8 @@ from mcp_context_doctor.config import (
     expand,
     inventory,
     parse_config,
+    predefined_variables,
+    read_data,
 )
 from mcp_context_doctor.measure import Counter, analyze, budget, compare, validate_capture
 from mcp_context_doctor.probe import ProbeLimit, collect, prepare, probe
@@ -304,3 +306,116 @@ def test_markdown_does_not_render_server_markup(counter):
         ],
     }
     assert "<script>" not in markdown(report)
+
+
+def test_empty_config_file_is_an_empty_inventory_not_a_broken_file(tmp_path):
+    # Hosts create the file before anything is configured; flagging it as invalid
+    # would report a healthy machine as having incomplete coverage.
+    for name in ("mcp.json", "config.toml"):
+        blank = tmp_path / name
+        blank.write_text(" " * 4, encoding="utf-8")
+        assert read_data(blank) == {}
+        assert parse_config(blank, "vscode", tmp_path) == []
+    servers, sources = inventory([("vscode", tmp_path / "mcp.json")], tmp_path)
+    assert servers == []
+    assert sources[0]["status"] == "read"
+
+
+def test_editor_predefined_variables_resolve_from_selected_project(tmp_path):
+    project = tmp_path / "work"
+    project.mkdir()
+    config = tmp_path / "mcp.json"
+    config.write_text(
+        json.dumps(
+            {
+                "servers": {
+                    "s": {
+                        "command": "node",
+                        "args": ["${workspaceFolder}/server.js", "${workspaceFolderBasename}"],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    server = parse_config(config, "vscode", project)[0]
+    assert prepare(server)["args"] == [str(project.resolve()) + "/server.js", "work"]
+    # An interactive input prompt still has no known value and must stay unresolved.
+    server.config = {"command": "node", "args": ["${input:token}"]}
+    with pytest.raises(ValueError):
+        prepare(server)
+
+
+def test_predefined_variables_do_not_leak_when_no_project_is_selected():
+    values = predefined_variables(None)
+    assert "workspaceFolder" not in values
+    assert "userHome" in values
+
+
+def test_report_renders_on_a_console_that_cannot_encode_every_character(tmp_path, capsys):
+    # A non-UTF-8 console must not turn a valid report into an encoding failure.
+    capture = tmp_path / "capture.json"
+    # A tool name no console encoding covers. Names are server-controlled text.
+    payload = {
+        "instructions": "",
+        "tools": [
+            {
+                "name": "слово-例-ἀ",
+                "description": "Read a record.",
+                "inputSchema": {"type": "object", "properties": {}},
+            }
+        ],
+    }
+    capture.write_text(json.dumps(payload), encoding="utf-8")
+    stdout = sys.stdout
+    sys.stdout = open(tmp_path / "out.txt", "w", encoding="cp932")
+    try:
+        assert main(["analyze", str(capture), "--include-names"]) == 0
+    finally:
+        sys.stdout.close()
+        sys.stdout = stdout
+    rendered = (tmp_path / "out.txt").read_text(encoding="cp932")
+    assert "MCP Context Doctor" in rendered
+    assert "Interpretation and coverage" in rendered
+
+
+def test_markdown_body_is_ascii_so_narrow_consoles_cannot_fail():
+    report = {
+        "mode": "static",
+        "encoding": "o200k_base",
+        "servers": [],
+        "groups": [],
+        "methodology": [],
+        "sources": [],
+    }
+    assert markdown(report).isascii()
+
+
+def test_name_selector_matching_multiple_scopes_is_reported(tmp_path):
+    project = tmp_path / "work"
+    project.mkdir()
+    entry = {"mcpServers": {"shared": {"command": "node", "args": ["a.js"]}}}
+    first, second = tmp_path / "a.json", tmp_path / "b.json"
+    first.write_text(json.dumps(entry), encoding="utf-8")
+    second.write_text(json.dumps(entry), encoding="utf-8")
+    args = SimpleNamespace(
+        config=[first, second],
+        project=project,
+        host="all",
+        server=["shared"],
+        live=False,
+        encoding="o200k_base",
+        context_window=None,
+        reserve=0,
+        include_names=False,
+        fail_on_budget=False,
+        format="json",
+        output=None,
+        timeout=5,
+        max_pages=5,
+    )
+    from mcp_context_doctor.cli import scan
+
+    report = anyio.run(scan, args)
+    assert len(report["servers"]) == 2
+    assert "name_selector_matched_multiple_scopes" in report["coverage"]

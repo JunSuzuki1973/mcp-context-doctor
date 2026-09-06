@@ -78,7 +78,7 @@ The example window is an illustrative budget, not a claimed model specification.
 | Claude Code | User `.claude.json`, selected project-local entries, project `.mcp.json` |
 | Claude Desktop | Known Windows/macOS config path |
 | Cursor | User/project `.cursor/mcp.json` |
-| VS Code | User/project `mcp.json`, JSON comments/trailing commas |
+| VS Code | User/project `mcp.json`, JSON comments/trailing commas, `${workspaceFolder}`/`${userHome}` |
 | Other hosts / plugins | Explicit `--config` with `mcpServers`, `servers`, or `mcp_servers` mapping |
 | Live transport | STDIO and Streamable HTTP, static/environment headers |
 | Offline capture | Raw `tools/list` or Inspector JSON envelope |
@@ -110,6 +110,8 @@ GitHub releases include `mcp-context-doctor-skill.zip`. Cursor/VS Code configura
 - `runtime_output_tokens: null`: tool output is unmeasured; large responses can dominate context even with small definitions.
 - Named tokenizer proxies (`o200k_base`, `cl100k_base`) are not exact Claude counts or provider usage reports.
 - A timeout, missing server or incomplete page is unknown, not zero. Static scan completion does not mean the host is healthy.
+- `auth_required` means the endpoint rejected an unauthenticated request; the doctor performs no OAuth. Supply credentials through the config's referenced environment variables.
+- Errors are reported as a fixed code so that raw config values and server text cannot leak. Set `DOCTOR_DEBUG=1` for a local traceback.
 - `--fail-on-budget` exits 3 only for a supplied eager scenario budget. There is no universal server-count threshold.
 
 Exit codes: **0** completed; **2** invalid input or incomplete live collection; **3** supplied projection budget exceeded. See [design](docs/design.md) for formulas and limitations.

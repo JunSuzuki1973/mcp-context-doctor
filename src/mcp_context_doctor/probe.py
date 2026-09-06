@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from contextlib import AsyncExitStack
 from urllib.parse import urlsplit
 
@@ -19,6 +20,10 @@ from .measure import canonical
 
 class ProbeLimit(ValueError):
     pass
+
+
+class ProbeAuth(Exception):
+    """The endpoint rejected an unauthenticated request."""
 
 
 async def collect(
@@ -45,7 +50,7 @@ async def collect(
 
 
 def prepare(server: Server) -> dict:
-    cfg = expand(server.config, dict(os.environ))
+    cfg = expand(server.config, {**os.environ, **server.variables})
     if "envFile" in cfg:
         raise ValueError("env_file_requires_explicit_resolution")
     if server.transport == "stdio":
@@ -87,8 +92,29 @@ def prepare(server: Server) -> dict:
     return cfg
 
 
-async def probe(server: Server, timeout: float = 20, max_pages: int = 50) -> dict:
-    cfg = prepare(server)
+async def unauthorized(cfg: dict, timeout: float) -> bool:
+    """Classify an already-failed HTTP attempt. Reads the status line, never the body.
+
+    SDK v2 reports a rejected handshake as an opaque MCPError with no HTTP status, so
+    the most common remote failure - an OAuth-protected endpoint - is indistinguishable
+    from a broken server. One extra request to the endpoint the caller already selected
+    recovers that distinction without widening the trust boundary.
+    """
+    try:
+        async with httpx2.AsyncClient(
+            headers=cfg["headers"], timeout=timeout, follow_redirects=False, trust_env=False
+        ) as http:
+            response = await http.post(
+                cfg["url"],
+                json={"jsonrpc": "2.0", "id": 0, "method": "ping"},
+                headers={"Accept": "application/json, text/event-stream"},
+            )
+            return response.status_code in (401, 403)
+    except Exception:
+        return False
+
+
+async def connect(server: Server, cfg: dict, timeout: float, max_pages: int) -> dict:
     # Third-party logs may contain credentials. Only typed status codes leave this boundary.
     logger_state = logging.root.manager.disable
     logging.disable(logging.CRITICAL)
@@ -128,14 +154,26 @@ async def probe(server: Server, timeout: float = 20, max_pages: int = 50) -> dic
                     capture = await collect(client, max_pages=max_pages)
                 version = client.protocol_version
                 # Protocol version comes from an untrusted server; only return its date shape.
-                import re
-
                 capture["protocol_version"] = (
                     version if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(version)) else "unknown"
                 )
                 return capture
     finally:
         logging.disable(logger_state)
+
+
+async def probe(server: Server, timeout: float = 20, max_pages: int = 50) -> dict:
+    cfg = prepare(server)
+    try:
+        return await connect(server, cfg, timeout, max_pages)
+    except BaseException as exc:
+        # Classification runs after the failed attempt has fully unwound, so it never
+        # issues a request inside a cancelled scope. Only the verdict is kept; the
+        # original exception text never leaves this boundary.
+        if server.transport == "http" and error_code(exc) == "probe_failed":
+            if await unauthorized(cfg, timeout):
+                raise ProbeAuth from None
+        raise
 
 
 def error_code(exc: BaseException) -> str:
@@ -147,6 +185,8 @@ def error_code(exc: BaseException) -> str:
         return codes[0] if codes else "probe_failed"
     if isinstance(exc, (TimeoutError, httpx2.TimeoutException)):
         return "timeout"
+    if isinstance(exc, ProbeAuth):
+        return "auth_required"
     if isinstance(exc, ProbeLimit):
         return "catalog_limit"
     if isinstance(exc, httpx2.HTTPStatusError) and exc.response.status_code in (401, 403):
