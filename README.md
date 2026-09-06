@@ -32,7 +32,7 @@ uv run mcp-context-doctor --help
 For a CLI usable from any project:
 
 ```sh
-uv tool install "git+https://github.com/JunSuzuki1973/mcp-context-doctor.git@v0.1.0"
+uv tool install "git+https://github.com/JunSuzuki1973/mcp-context-doctor.git@v0.1.1"
 ```
 
 Or, from a clone: `python -m pip install .`. This release is distributed on GitHub; it is **not published to PyPI**. The first tiktoken call can download/cache public encoding data. Subsequent offline use requires that cache.

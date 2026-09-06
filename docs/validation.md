@@ -1,8 +1,9 @@
 # Validation record
 
-Local validation date: 2026-09-06. Test data is synthetic. This is a scoped engineering record, not security certification.
+Local validation date: 2026-09-07 (0.1.1). Test data is synthetic. This is a scoped engineering record, not security certification.
 
-- Windows / Python 3.14.4: unit and integration suite passes, including legacy `2025-11-25` STDIO and current `2026-07-28` Streamable HTTP discovery.
+- Windows / Python 3.11.15 and 3.14.4: unit and integration suite passes (39 tests), including legacy `2025-11-25` STDIO and current `2026-07-28` Streamable HTTP discovery.
+- 0.1.1 fixes were each confirmed to fail before the change and pass after it. The non-UTF-8 console regression was reproduced on a live cp932 console, and the `auth_required` classification against a real OAuth-protected local endpoint.
 - SDK: `mcp==2.1.1`; tokenizer: `tiktoken==0.14.0`; full environment is pinned in `uv.lock`.
 - Official MCP Inspector 2.5.0 independently returns the same two tools across the paginated test fixture. Both measurements produce **46 core definition tokens** with `o200k_base`. Instructions are excluded from this cross-check because Inspector's tools/list export does not include them.
 - The standalone synthetic example produces **100 core definition tokens + 12 instruction tokens = 112 eager projection tokens**. It is not a measurement of any user's PC or of a provider request.
