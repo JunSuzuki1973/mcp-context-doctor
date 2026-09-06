@@ -86,7 +86,7 @@ mcp-context-doctor analyze /path/to/inspector-export.json --format json --output
 mcp-context-doctor diff before.json after.json
 ```
 
-The example window is an illustrative budget, not a claimed model specification. Reports refuse to overwrite existing files. Default reports omit names, paths, URLs, raw schemas and credentials. Use `--include-names` for locally reviewed names.
+The example window is an illustrative budget, not a claimed model specification. Reports refuse to overwrite existing files. Default reports omit names, paths, URLs, raw schemas and credentials, so items name hashed ids; a hashed report says so and points at `--include-names`, which is for a locally reviewed report. Review before sharing one.
 
 ## Supported scope
 
@@ -152,6 +152,7 @@ the host's loading mode, history or which tools you actually use:
 | `one_backend_configured_more_than_once` | Endpoints compared after normalization, including through proxy wrappers |
 | `enabled_servers_not_measured` | Coverage; the advice differs by reason (`not_probed` vs `auth_required`) |
 | `tools_without_a_description` | The model has only the name to select on |
+| `most_tools_declare_no_output_bound` | Neither a result-limiting parameter nor a configured output token limit is declared |
 
 Thresholds are review heuristics, named as constants in `diagnose.py`, not limits
 derived from any model or host. **No item asserts that a context window will overflow**,
@@ -162,7 +163,8 @@ and `nothing_measured` is never a clean bill of health.
 - `always_loaded_tokens`: the advertised tool names. A host carries these whether or not it has loaded the definitions, so this is a floor that holds under deferred loading. It is not a total: host framing, separators and built-in instructions are excluded. `always_loaded_basis` says whether names were counted bare or with the host's `mcp__<server>__` prefix, which is applied only for hosts whose convention is verified.
 - `eager_projection_tokens`: selected names/descriptions/input schemas plus server instructions, measured as canonical JSON/text. This is the ceiling, and it is `null` when the capture carried no input schemas.
 - `selected_wire_catalog_tokens`: catalog including output schemas and metadata. This overlaps the first metric; **do not add them**.
-- `runtime_output_tokens: null`: tool output is unmeasured; large responses can dominate context even with small definitions.
+- `runtime_output_tokens: null`: **always null, by design.** The doctor performs discovery and never calls a tool, so it cannot observe a response. A large response can dominate context even where definitions are small, and nothing here measures that. What it does report is `output_bound` per tool: whether a result-limiting parameter is declared in the input schema, and whether the config sets an output token limit. An `outputSchema` is not counted as a bound, because it fixes shape rather than size.
+- `declared_loading_behavior`: set with `--loading deferred|eager`. A host's loading mode is not detectable from a catalog, so it is declared by you, never inferred. The default, `unknown`, prints both the floor and the ceiling and asserts neither.
 - Named tokenizer proxies (`o200k_base`, `cl100k_base`) are not exact Claude counts or provider usage reports.
 - A timeout, missing server or incomplete page is unknown, not zero. Static scan completion does not mean the host is healthy.
 - `auth_required` means the endpoint rejected an unauthenticated request; the doctor performs no OAuth. Supply credentials through the config's referenced environment variables.

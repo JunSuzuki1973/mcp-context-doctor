@@ -28,7 +28,9 @@ Files/scopes remain independent. A global entry and project entry with the same 
 | per-tool components | Independently encoded description/schema fields | Diagnostic breakdown; not additive exact attribution |
 | configured_output_token_limit | Declared per-tool policy, when present | Not a measured response or verified enforcement |
 | fingerprint | SHA-256 of sorted selected definitions plus instructions | Contract drift, not a malware verdict |
-| runtime_output_tokens | null | Discovery cannot measure future tool output |
+| runtime_output_tokens | null | Always null: the collector never calls a tool |
+| output_bound | Declared result-limiting parameter, configured output limit | Declarations, not an observed response; outputSchema fixes shape, not size |
+| declared_loading_behavior | Operator-declared loading mode | Not detectable from a catalog and never inferred |
 
 A capture whose tools all lack `inputSchema` is measured as `names_only`: the floor is
 reported and every schema-derived field is `null`, never `0`. A capture where only some
@@ -41,6 +43,26 @@ is a partial sum.
 The budget formula is `context_window - reserved_tokens - eager_projection_tokens`. A negative value is an exceeded **user-supplied scenario budget**, not an observed overflow. There is no universal 10-server / 50-tool danger threshold. The 1,000-token definition/instructions finding is a configurable-in-code review heuristic, not a model limit.
 
 Reports omit raw config, URLs, commands, arguments, environment values, instructions, schema bodies, and exception text. `DOCTOR_DEBUG` prints a traceback for local debugging; it can disclose configuration values and server output and is never on by default. Server/tool names are hashed unless `--include-names` is requested. Hashes support local correlation; they are pseudonyms, not a promise of anonymity.
+
+## Loading mode
+
+Whether a host loads every definition up front or fetches them on use changes which
+figure matters, and a catalog carries no evidence of it. The mode is therefore declared
+with `--loading`, never guessed. `deferred` headlines the always-loaded floor, `eager`
+headlines the projection, and the default prints both and asserts neither. The value is
+recorded on the report and on each server so a saved report says which scenario it was
+read under.
+
+## Tool output
+
+Tool output is not measured and will not be: the collector performs discovery and never
+issues `tools/call`, so no response exists to count. `runtime_output_tokens` is null in
+every report. What the catalog and config do declare is recorded per tool in
+`output_bound`: a result-limiting parameter in the input schema, and a configured output
+token limit. An `outputSchema` is deliberately not counted as a bound, because it
+constrains shape and not size. The corresponding diagnosis item fires only for a catalog
+large enough for the absence to be a pattern, carries no `impact_tokens`, and states that
+no response size is implied.
 
 ## Diagnosis
 

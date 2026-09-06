@@ -21,6 +21,11 @@ CONCENTRATION_SHARE = 0.40
 CONCENTRATION_MINORITY = 0.30
 CONCENTRATION_MIN_TOOLS = 5
 
+# A catalog this large in which almost nothing declares a way to bound a response is
+# worth naming. A small server is not: two unbounded tools is a shape, not a pattern.
+UNBOUNDED_MIN_TOOLS = 10
+UNBOUNDED_SHARE = 0.80
+
 # A description this many times the median across everything measured is an outlier in
 # its own report, not a violation of any rule.
 OUTLIER_MULTIPLE = 5
@@ -62,6 +67,40 @@ def _concentration(server: dict, measurement: dict) -> dict | None:
                 ),
             }
     return None
+
+
+def _unbounded(server: dict, measurement: dict) -> dict | None:
+    """Tools declaring no way to limit their own response.
+
+    The doctor never calls a tool, so a response size is never measured and this asserts
+    nothing about one. It reports only what the catalog and the config declare: an input
+    parameter that limits results, or a host-configured output token limit.
+    """
+    tools = [t for t in measurement["tools"] if t.get("output_bound")]
+    if len(tools) < UNBOUNDED_MIN_TOOLS:
+        return None
+    unbounded = [t for t in tools if not t["output_bound"]["declared"]]
+    if len(unbounded) < len(tools) * UNBOUNDED_SHARE:
+        return None
+    return {
+        "code": "most_tools_declare_no_output_bound",
+        "server": server.get("id"),
+        "server_name": server.get("name"),
+        # Response size is unmeasured, so this item claims no token impact.
+        "impact_tokens": 0,
+        "evidence": {
+            "unbounded": len(unbounded),
+            "of_tools": len(tools),
+            "examples": [_name(t) for t in unbounded][:8],
+        },
+        "action": (
+            f"{len(unbounded)} of {len(tools)} tools declare neither a result-limiting "
+            "parameter nor a configured output token limit. Tool output is not measured "
+            "here and no size is implied; this is what the catalog and config declare. "
+            "Where the host supports a per-tool output limit, setting one bounds the case "
+            "a large definition budget does not protect against."
+        ),
+    }
 
 
 def _outliers(servers: list[dict]) -> list[dict]:
@@ -256,6 +295,8 @@ def diagnose(report: dict) -> dict:
     for server in measured:
         if found := _concentration(server, server["measurement"]):
             items.append(found)
+        if found := _unbounded(server, server["measurement"]):
+            items.append(found)
     items += _outliers(measured)
     items += _duplicates(servers)
     items += _rollup(measured)
@@ -287,5 +328,6 @@ def diagnose(report: dict) -> dict:
             "Items are derived only from what was measured in this run.",
             "Thresholds are review heuristics, not model or host limits.",
             "No item asserts that a context window will overflow.",
+            "Tool output is never called and never measured; output items report declarations only.",
         ],
     }

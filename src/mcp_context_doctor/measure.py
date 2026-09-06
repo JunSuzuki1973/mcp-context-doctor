@@ -113,6 +113,20 @@ def analyze(
             ):
                 findings.append("no_recognized_output_bound_parameter")
         policy = output_policies.get(tool["name"], {}) if isinstance(output_policies, dict) else {}
+        limit = (
+            policy.get("output_token_limit")
+            if isinstance(policy.get("output_token_limit"), int)
+            else None
+        )
+        # What the catalog and config declare about constraining a response. An
+        # outputSchema is deliberately not counted: it fixes shape, not size. Discovery
+        # cannot observe an actual response, so this stays a declaration, not a measurement.
+        bound = {
+            "input_parameter": full and "no_recognized_output_bound_parameter" not in findings,
+            "configured_limit": limit,
+            "output_schema_declared": "outputSchema" in tool,
+        }
+        bound["declared"] = bool(bound["input_parameter"] or limit is not None)
         details.append(
             {
                 "id": "tool-" + identity(tool["name"]),
@@ -125,9 +139,8 @@ def analyze(
                 if "outputSchema" in tool
                 else (0 if full else None),
                 "description_tokens": counter.text(desc),
-                "configured_output_token_limit": policy.get("output_token_limit")
-                if isinstance(policy.get("output_token_limit"), int)
-                else None,
+                "configured_output_token_limit": limit,
+                "output_bound": bound,
                 "findings": findings,
             }
         )

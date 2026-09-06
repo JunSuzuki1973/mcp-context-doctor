@@ -62,6 +62,17 @@ def parser() -> argparse.ArgumentParser:
             help="Include server/tool names; review before sharing.",
         )
         cmd.add_argument(
+            "--loading",
+            choices=["unknown", "deferred", "eager"],
+            default="unknown",
+            help=(
+                "Which figure to headline. The host's loading mode is not detectable from "
+                "a catalog, so it is declared, never guessed: 'deferred' headlines the "
+                "always-loaded floor, 'eager' the projection, and the default shows both "
+                "without asserting either."
+            ),
+        )
+        cmd.add_argument(
             "--verbose",
             action="store_true",
             help="Print the full methodology and coverage notes, not the one-line basis.",
@@ -146,7 +157,8 @@ async def scan(args) -> dict:
     counter = Counter(args.encoding) if args.live else None
     for server in servers:
         row = server.public(args.include_names)
-        row["loading_behavior"] = "unknown"
+        # Declared by the operator, who knows their host; never inferred from a catalog.
+        row["loading_behavior"] = args.loading
         if server.config.get("alwaysLoad") is True:
             row["findings"].append("always_load_requested")
         if not server.enabled:
@@ -182,6 +194,7 @@ def base(args) -> dict:
         "version": __version__,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "encoding": args.encoding,
+        "declared_loading_behavior": args.loading,
         "methodology": METHOD,
         "servers": [],
     }
@@ -276,10 +289,36 @@ def markdown(report: dict, verbose: bool = False) -> str:
             "",
         ]
         if c["measured_servers"]:
+            mode = report.get("declared_loading_behavior", "unknown")
+            ceiling = sum(g.get("tokens", 0) for g in report.get("groups", []))
+            if mode == "deferred":
+                lines += [
+                    f"Declared loading: deferred. Across measured servers the names cost "
+                    f"**{d['always_loaded_tokens']} tokens**; the {ceiling}-token eager "
+                    "projection applies only to definitions the host actually loads.",
+                    "",
+                ]
+            elif mode == "eager":
+                lines += [
+                    f"Declared loading: eager. Across measured servers the definitions "
+                    f"project to **{ceiling} tokens**, of which {d['always_loaded_tokens']} "
+                    "is the names alone.",
+                    "",
+                ]
+            else:
+                lines += [
+                    f"Always loaded across measured servers: "
+                    f"**{d['always_loaded_tokens']} tokens**, against a {ceiling}-token eager "
+                    "projection. Declare --loading deferred or eager to headline one; the "
+                    "mode is not detectable from a catalog.",
+                    "",
+                ]
+        # Hashed identifiers make the items above unreadable to the person who owns the
+        # machine, so say how to get names rather than leaving them to guess.
+        if d["items"] and not any("name" in s for s in report["servers"]):
             lines += [
-                f"Always loaded across measured servers: "
-                f"**{d['always_loaded_tokens']} tokens**. This is the floor a host carries "
-                "in every loading mode.",
+                "Server and tool names are hashed by default. Re-run with --include-names "
+                "for a locally readable report; review before sharing it.",
                 "",
             ]
         for index, item in enumerate(d["items"], start=1):
@@ -393,6 +432,7 @@ def main(argv=None) -> int:
             report["mode"] = "offline-capture"
             server = Server("capture", {}, "offline-capture")
             row = server.public(args.include_names)
+            row["loading_behavior"] = args.loading
             row["measurement"] = analyze(capture, {}, Counter(args.encoding), args.include_names)
             report["servers"] = [row]
             finalize(report, args)

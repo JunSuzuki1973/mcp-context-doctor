@@ -416,6 +416,9 @@ def test_name_selector_matching_multiple_scopes_is_reported(tmp_path):
         output=None,
         timeout=5,
         max_pages=5,
+        loading="unknown",
+        verbose=False,
+        bearer_env=None,
     )
     from mcp_context_doctor.cli import scan
 
@@ -827,3 +830,122 @@ def test_json_always_carries_the_full_methodology(tmp_path, capsys):
     assert len(data["methodology"]) > 1
     assert data["diagnosis"]["verdict"]
     assert data["diagnosis"]["basis"]
+
+
+def unbounded_capture(count, bounded=0):
+    """`count` tools, the first `bounded` of them taking a result-limiting parameter."""
+    tools = []
+    for i in range(count):
+        props = {"limit": {"type": "integer"}} if i < bounded else {"q": {"type": "string"}}
+        tools.append(
+            {
+                "name": f"tool_{i:02d}",
+                "description": f"Tool {i}.",
+                "inputSchema": {"type": "object", "properties": props},
+            }
+        )
+    return {"instructions": "", "tools": tools}
+
+
+def test_output_bound_records_declarations_and_not_a_measurement(counter):
+    m = analyze(unbounded_capture(2, bounded=1), {}, counter)
+    by_name = {
+        t["name"]: t
+        for t in analyze(unbounded_capture(2, bounded=1), {}, counter, include_names=True)["tools"]
+    }
+    assert by_name["tool_00"]["output_bound"]["input_parameter"] is True
+    assert by_name["tool_00"]["output_bound"]["declared"] is True
+    assert by_name["tool_01"]["output_bound"]["input_parameter"] is False
+    assert by_name["tool_01"]["output_bound"]["declared"] is False
+    # Discovery never calls a tool, so no response size is ever recorded.
+    assert m["runtime_output_tokens"] is None
+
+
+def test_a_configured_limit_counts_as_a_declared_bound(counter):
+    cfg = {"tools": {"tool_00": {"output_token_limit": 4096}}}
+    tools = {
+        t["name"]: t
+        for t in analyze(unbounded_capture(2), cfg, counter, include_names=True)["tools"]
+    }
+    assert tools["tool_00"]["configured_output_token_limit"] == 4096
+    assert tools["tool_00"]["output_bound"]["declared"] is True
+    assert tools["tool_01"]["output_bound"]["declared"] is False
+
+
+def test_a_names_only_capture_claims_no_input_bound_it_cannot_see(counter):
+    # Without schemas there is no evidence either way; absence must not read as present.
+    m = analyze(NAMES_ONLY, {}, counter)
+    for tool in m["tools"]:
+        assert tool["output_bound"]["input_parameter"] is False
+        assert tool["output_bound"]["declared"] is False
+
+
+def test_unbounded_output_is_reported_only_for_a_large_mostly_unbounded_catalog(counter):
+    wide = diagnose({"servers": [row(analyze(unbounded_capture(12), {}, counter), id="a")]})
+    item = next(i for i in wide["items"] if i["code"] == "most_tools_declare_no_output_bound")
+    assert item["evidence"] == {
+        "unbounded": 12,
+        "of_tools": 12,
+        "examples": item["evidence"]["examples"],
+    }
+    # Response size is unmeasured, so the item must not claim a token impact.
+    assert item["impact_tokens"] == 0
+    assert "not measured" in item["action"]
+
+    # A small server is a shape, not a pattern.
+    small = diagnose({"servers": [row(analyze(unbounded_capture(4), {}, counter), id="a")]})
+    assert not any(i["code"] == "most_tools_declare_no_output_bound" for i in small["items"])
+    # A catalog that mostly bounds itself is not flagged either.
+    good = diagnose(
+        {"servers": [row(analyze(unbounded_capture(12, bounded=10), {}, counter), id="a")]}
+    )
+    assert not any(i["code"] == "most_tools_declare_no_output_bound" for i in good["items"])
+
+
+def test_loading_mode_is_declared_not_inferred(tmp_path, capsys):
+    capture = write_config(tmp_path, json.dumps(CAPTURE), "capture.json")
+    assert main(["analyze", str(capture), "--format", "json"]) == 0
+    assert json.loads(capsys.readouterr().out)["declared_loading_behavior"] == "unknown"
+    assert main(["analyze", str(capture), "--format", "json", "--loading", "deferred"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["declared_loading_behavior"] == "deferred"
+    assert data["servers"][0]["loading_behavior"] == "deferred"
+
+
+def test_each_declared_mode_headlines_its_own_figure(counter):
+    def render(mode):
+        report = {
+            "mode": "live-discovery",
+            "encoding": "o200k_base",
+            "declared_loading_behavior": mode,
+            "servers": [row(analyze(CAPTURE, {}, counter), id="a", name="brain")],
+            "groups": [{"id": "g", "tokens": 999}],
+            "methodology": [],
+            "sources": [],
+        }
+        report["diagnosis"] = diagnose(report)
+        return markdown(report)
+
+    assert "Declared loading: deferred" in render("deferred")
+    assert "Declared loading: eager" in render("eager")
+    # Undeclared shows both and asserts neither.
+    unknown = render("unknown")
+    assert "not detectable from a catalog" in unknown
+    assert "Declared loading:" not in unknown
+
+
+def test_hashed_report_says_how_to_become_readable(counter):
+    report = {
+        "mode": "static",
+        "encoding": "o200k_base",
+        "declared_loading_behavior": "unknown",
+        "servers": [row({"status": "auth_required"}, id="a")],
+        "groups": [],
+        "methodology": [],
+        "sources": [],
+    }
+    report["diagnosis"] = diagnose(report)
+    assert "--include-names" in markdown(report)
+    # With names present the hint is noise.
+    report["servers"][0]["name"] = "brain"
+    assert "--include-names" not in markdown(report)
