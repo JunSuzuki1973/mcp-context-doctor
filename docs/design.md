@@ -1,6 +1,6 @@
 # Design and measurement contract
 
-Version 0.1.1 uses a CLI plus an Agent Skill. It does not add another always-connected MCP server.
+Version 0.2.0 uses a CLI plus an Agent Skill. It does not add another always-connected MCP server.
 
 ## Data flow
 
@@ -75,4 +75,4 @@ Tool pagination uses opaque cursors, rejects cycles, and limits page count, tool
 
 ## Future evidence-driven extensions
 
-Host adapters can import an effective exported inventory or measured request usage. Runtime output receipts could record bytes/tokens without retaining sensitive text. Both should preserve the distinction between raw MCP data, host conversion, and provider-reported usage. These features are not implemented in 0.1.1.
+Host adapters can import an effective exported inventory or measured request usage. Runtime output receipts could record bytes/tokens without retaining sensitive text. Both should preserve the distinction between raw MCP data, host conversion, and provider-reported usage. These features are not implemented in 0.2.0.

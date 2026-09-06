@@ -20,7 +20,7 @@ uv run mcp-context-doctor --help
 どのプロジェクトからでも呼び出す場合:
 
 ```sh
-uv tool install "git+https://github.com/JunSuzuki1973/mcp-context-doctor.git@v0.1.1"
+uv tool install "git+https://github.com/JunSuzuki1973/mcp-context-doctor.git@v0.2.0"
 ```
 
 PyPIへは公開していません。公式MCP Python SDKとtiktokenを利用し、LLM APIキーなしで動きます。初回は依存関係・トークナイザデータをダウンロードします。
