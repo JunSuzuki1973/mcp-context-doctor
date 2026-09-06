@@ -379,7 +379,7 @@ def test_report_renders_on_a_console_that_cannot_encode_every_character(tmp_path
         sys.stdout = stdout
     rendered = (tmp_path / "out.txt").read_text(encoding="cp932")
     assert "MCP Context Doctor" in rendered
-    assert "Interpretation and coverage" in rendered
+    assert "methodology and coverage notes apply" in rendered
 
 
 def test_markdown_body_is_ascii_so_narrow_consoles_cannot_fail():
@@ -793,3 +793,37 @@ def test_floor_line_is_omitted_when_nothing_was_measured(counter):
     # "0 tokens" next to a floor label reads as a measured zero. Say nothing instead.
     assert "Always loaded across measured servers" not in rendered
     assert "Nothing was measured" in rendered
+
+
+def test_caveats_are_collapsed_by_default_and_restored_by_verbose(counter):
+    report = {
+        "mode": "static",
+        "encoding": "o200k_base",
+        "servers": [row(analyze(CAPTURE, {}, counter), id="a")],
+        "groups": [],
+        "methodology": ["Method one.", "Method two."],
+        "coverage": ["Coverage one."],
+        "sources": [],
+    }
+    report["diagnosis"] = diagnose(report)
+    brief = markdown(report)
+    full = markdown(report, verbose=True)
+    # Correct but long: the default keeps a pointer so the finding stays on screen.
+    assert "Method one." not in brief
+    assert "methodology and coverage notes apply" in brief
+    assert "--verbose" in brief
+    # Nothing is deleted, only moved behind a flag.
+    for note in ("Method one.", "Method two.", "Coverage one."):
+        assert note in full
+    assert len(brief.splitlines()) < len(full.splitlines())
+    assert brief.isascii() and full.isascii()
+
+
+def test_json_always_carries_the_full_methodology(tmp_path, capsys):
+    capture = write_config(tmp_path, json.dumps(CAPTURE), "capture.json")
+    assert main(["analyze", str(capture), "--format", "json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    # A machine reader must never have to ask for the caveats.
+    assert len(data["methodology"]) > 1
+    assert data["diagnosis"]["verdict"]
+    assert data["diagnosis"]["basis"]

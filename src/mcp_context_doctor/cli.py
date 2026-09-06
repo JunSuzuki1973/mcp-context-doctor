@@ -62,6 +62,11 @@ def parser() -> argparse.ArgumentParser:
             help="Include server/tool names; review before sharing.",
         )
         cmd.add_argument(
+            "--verbose",
+            action="store_true",
+            help="Print the full methodology and coverage notes, not the one-line basis.",
+        )
+        cmd.add_argument(
             "--fail-on-budget",
             action="store_true",
             help="Exit 3 when an eager projection exceeds the supplied budget.",
@@ -218,7 +223,7 @@ def finalize(report: dict, args) -> dict:
     return report
 
 
-def markdown(report: dict) -> str:
+def markdown(report: dict, verbose: bool = False) -> str:
     def safe(text):
         return (
             str(text)
@@ -315,13 +320,27 @@ def markdown(report: dict) -> str:
                 f"{b['remaining_in_projection']} tokens; collection complete: {g['complete']}; "
                 f"projection complete: {g['projection_complete']}."
             )
-    lines += ["", "## Interpretation and coverage", ""]
-    lines += ["- " + item for item in report["methodology"] + report.get("coverage", [])]
-    lines += [
-        "- JSON includes per-tool measurements and independent config groups.",
-        "- No runtime tool output was measured. No universal safe server-count threshold is assumed.",
-        "",
+    notes = list(report["methodology"]) + list(report.get("coverage", []))
+    notes += [
+        "JSON includes per-tool measurements and independent config groups.",
+        "No runtime tool output was measured. No universal safe server-count threshold is assumed.",
     ]
+    if verbose:
+        lines += ["", "## Interpretation and coverage", ""]
+        lines += ["- " + item for item in notes]
+        lines += [""]
+    else:
+        # The notes are correct and they are long. Left inline they bury the finding
+        # the reader came for, so the default keeps a pointer and the JSON keeps them.
+        lines += [
+            "",
+            "---",
+            "",
+            f"Token figures are eager-loading projections against a named tokenizer proxy, "
+            f"not host usage. {len(notes)} methodology and coverage notes apply: re-run with "
+            "--verbose, or read `methodology` and `coverage` in --format json.",
+            "",
+        ]
     return "\n".join(lines)
 
 
@@ -364,7 +383,7 @@ def main(argv=None) -> int:
         rendered = (
             json.dumps(report, indent=2, ensure_ascii=True) + "\n"
             if args.format == "json"
-            else markdown(report)
+            else markdown(report, args.verbose)
         )
         if args.output:
             # Atomic exclusive creation prevents an existing file from being overwritten.

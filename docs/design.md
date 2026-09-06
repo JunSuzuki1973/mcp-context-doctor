@@ -61,6 +61,12 @@ stated first precisely so a verdict is not read as covering servers that were sk
 Thresholds are module constants documented as review heuristics; a reader can disagree
 with a number instead of reverse-engineering it.
 
+The methodology and coverage notes are correct and they are long. Printed inline they
+bury the finding a reader opened the report for, so markdown output keeps a one-line
+basis and a pointer by default and restores the full text under `--verbose`. Nothing is
+deleted: JSON output always carries `methodology`, `coverage` and `diagnosis` in full, so
+a machine reader never has to ask for the caveats.
+
 ## Failure behavior
 
 Missing, disabled, malformed, unsupported, timeout, and failed discovery states are not counted as zero measured cost. SDK v2 reports a rejected HTTP handshake as an opaque error without its status, so a failed HTTP attempt is re-checked once against the same endpoint to separate `auth_required` from `probe_failed`. Only the status line is read; the body is discarded. That check runs after the failed attempt has unwound and never on a timeout. Incomplete groups remain incomplete. A live scan with missing measurements exits 2. Budget exit 3 takes precedence when the measured portion already exceeds its supplied budget. Static exit 0 means the command completed, not that the host is healthy.

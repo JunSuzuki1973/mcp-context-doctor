@@ -85,6 +85,7 @@ The example window is an illustrative budget, not a claimed model specification.
 | Offline capture | Raw `tools/list` or Inspector JSON envelope; a names-only catalog measures the floor |
 | Schemas | Validation and separate input/output schema counts |
 | Comparison | Stable fingerprints, token deltas, unknown-state handling |
+| Report length | Verdict and items by default; `--verbose` restores the full methodology |
 
 Config files/scopes stay separate: totals are **not** a combined active host context. Managed policies, plugin enablement, host precedence, OAuth credential stores, remote hosts and lazy-loading state are not automatically resolved. Supply an explicit trusted exported inventory when needed. Legacy SSE is currently an offline-import path.
 
