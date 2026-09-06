@@ -11,6 +11,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import json5
 
@@ -38,6 +39,54 @@ def read_data(path: Path) -> dict:
     return data
 
 
+# Commands whose job is to forward a local stdio session to a remote MCP endpoint.
+# When one of these launches a server, the backend is the URL it is pointed at, not
+# the wrapper process, and it is the same backend another entry may reach directly.
+PROXY_COMMANDS = frozenset(
+    {"mcp-remote", "mcp-proxy", "supergateway", "mcp-superassistant-proxy", "mcpremote"}
+)
+LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0", "[::1]"})
+DEFAULT_PORTS = {"http": "80", "https": "443"}
+
+
+def canonical_argv(argv: list[str]) -> str:
+    return json.dumps(argv, sort_keys=True)
+
+
+def normalize_endpoint(url: str) -> str | None:
+    """Canonical identity for an MCP URL, or None when it is not one.
+
+    Folds the spellings that denote one endpoint - case, the loopback aliases, an
+    explicit default port, a trailing slash. Query and path are preserved: they can
+    select a different server on the same host.
+    """
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return None
+    host = parts.hostname.lower()
+    host = "localhost" if host in LOOPBACK else host
+    port = parts.port
+    if port is not None and str(port) != DEFAULT_PORTS.get(parts.scheme):
+        host = f"{host}:{port}"
+    path = parts.path.rstrip("/")
+    return urlunsplit((parts.scheme, host, path, parts.query, ""))
+
+
+def proxied_endpoint(argv: list[str]) -> str | None:
+    """The URL a proxy wrapper is pointed at, when the argv is such a wrapper."""
+    tokens = [t for t in argv if isinstance(t, str)]
+    names = {t.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].split("@")[0].lower() for t in tokens}
+    if not (names & PROXY_COMMANDS):
+        return None
+    for token in tokens:
+        if endpoint := normalize_endpoint(token):
+            return endpoint
+    return None
+
+
 @dataclass
 class Server:
     name: str
@@ -56,6 +105,27 @@ class Server:
     @property
     def group(self) -> str:
         return "config-" + identity(self.source + "\0" + self.scope)
+
+    @property
+    def endpoint(self) -> tuple[str, str] | None:
+        """(kind, identity) naming the backend this entry reaches, or None.
+
+        Two entries sharing an identity reach the same server even when their
+        transports differ, which is what a proxy wrapper produces.
+        """
+        cfg = self.config
+        if self.transport == "http":
+            if url := normalize_endpoint(str(cfg.get("url", ""))):
+                return ("url", url)
+            return None
+        if self.transport == "stdio":
+            argv = [str(cfg.get("command", ""))] + [
+                a for a in cfg.get("args", []) if isinstance(a, str)
+            ]
+            if url := proxied_endpoint(argv):
+                return ("url", url)
+            return ("command", canonical_argv(argv))
+        return None
 
     @property
     def tool_name_prefix(self) -> str | None:
@@ -208,19 +278,20 @@ def inventory(paths: list[tuple[str, Path]], project: Path) -> tuple[list[Server
             except (ValueError, OSError, TypeError, AttributeError, RecursionError):
                 source["status"] = "unreadable_or_invalid"
         sources.append(source)
-    endpoints: dict[str, list[Server]] = {}
+    endpoints: dict[tuple[str, str], list[Server]] = {}
     for server in servers:
-        cfg = server.config
-        fingerprint = json.dumps(
-            {k: cfg.get(k) for k in ("command", "args", "url", "env", "headers", "http_headers")},
-            sort_keys=True,
-        )
-        if server.transport != "unresolved":
-            endpoints.setdefault(fingerprint, []).append(server)
-    for group in endpoints.values():
-        if len(group) > 1:
-            for server in group:
-                server.notes.append("repeated_endpoint_not_proof_of_duplicate_loading")
+        if backend := server.endpoint:
+            endpoints.setdefault(backend, []).append(server)
+    for backend, group in endpoints.items():
+        if len(group) < 2:
+            continue
+        transports = {s.transport for s in group}
+        for server in group:
+            server.notes.append("repeated_endpoint_not_proof_of_duplicate_loading")
+            # Naming the reason matters: a wrapper and a direct connection look like
+            # two unrelated servers in the config but are one process to measure.
+            if backend[0] == "url" and len(transports) > 1:
+                server.notes.append("same_backend_reached_through_different_transports")
     return servers, sources
 
 

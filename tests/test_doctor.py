@@ -15,8 +15,10 @@ from mcp_context_doctor.config import (
     effective_tools,
     expand,
     inventory,
+    normalize_endpoint,
     parse_config,
     predefined_variables,
+    proxied_endpoint,
     read_data,
 )
 from mcp_context_doctor.measure import Counter, analyze, budget, compare, validate_capture
@@ -546,3 +548,86 @@ def test_report_names_the_floor_and_prints_unknown_for_an_unmeasured_ceiling(cou
     # The ceiling column must read unknown, not 0, for a floor-only measurement.
     assert "| unknown |" in rendered
     assert rendered.isascii()
+
+
+def test_endpoint_normalization_folds_spellings_of_one_url():
+    same = [
+        "http://localhost:8765/mcp",
+        "http://127.0.0.1:8765/mcp",
+        "HTTP://LocalHost:8765/mcp/",
+        "http://[::1]:8765/mcp",
+    ]
+    assert len({normalize_endpoint(u) for u in same}) == 1
+    # An explicit default port is the same endpoint; a non-default one is not.
+    assert normalize_endpoint("https://x.test:443/mcp") == normalize_endpoint("https://x.test/mcp")
+    assert normalize_endpoint("https://x.test:8443/mcp") != normalize_endpoint("https://x.test/mcp")
+    # Path and query select a server; they are identity, not noise.
+    assert normalize_endpoint("https://x.test/a") != normalize_endpoint("https://x.test/b")
+    assert normalize_endpoint("https://x.test/a?t=1") != normalize_endpoint("https://x.test/a")
+    for bad in ("", "not a url", "ftp://x.test/mcp", "file:///tmp/x"):
+        assert normalize_endpoint(bad) is None
+
+
+def test_proxy_wrapper_resolves_to_the_url_it_forwards_to():
+    argv = ["cmd", "/c", "npx", "-y", "mcp-remote", "http://localhost:8765/mcp"]
+    assert proxied_endpoint(argv) == normalize_endpoint("http://localhost:8765/mcp")
+    assert proxied_endpoint(["npx", "mcp-remote@0.1.2", "https://x.test/mcp"]) is not None
+    # A server that merely takes a URL argument is not a transport wrapper.
+    assert proxied_endpoint(["node", "server.js", "https://x.test/api"]) is None
+
+
+def test_same_backend_through_a_proxy_and_directly_is_reported(tmp_path):
+    # The case a config-field fingerprint misses: one endpoint, two spellings.
+    direct = write_config(
+        tmp_path,
+        json.dumps({"mcpServers": {"brain": {"url": "http://127.0.0.1:8765/mcp"}}}),
+        "a.json",
+    )
+    wrapped = write_config(
+        tmp_path,
+        json.dumps(
+            {
+                "mcpServers": {
+                    "brain": {
+                        "command": "cmd",
+                        "args": ["/c", "npx", "-y", "mcp-remote", "http://localhost:8765/mcp"],
+                    }
+                }
+            }
+        ),
+        "b.json",
+    )
+    servers, _ = inventory([("generic", direct), ("generic", wrapped)], tmp_path)
+    assert len(servers) == 2
+    for server in servers:
+        assert "repeated_endpoint_not_proof_of_duplicate_loading" in server.notes
+        assert "same_backend_reached_through_different_transports" in server.notes
+
+
+def test_distinct_backends_are_not_grouped(tmp_path):
+    data = {
+        "mcpServers": {
+            "a": {"url": "https://one.test/mcp"},
+            "b": {"url": "https://two.test/mcp"},
+            "c": {"command": "node", "args": ["one.js"]},
+            "d": {"command": "node", "args": ["two.js"]},
+        }
+    }
+    servers, _ = inventory([("generic", write_config(tmp_path, json.dumps(data)))], tmp_path)
+    assert len(servers) == 4
+    for server in servers:
+        assert server.notes == [] or "repeated_endpoint" not in " ".join(server.notes)
+
+
+def test_identical_stdio_commands_still_group_without_a_url(tmp_path):
+    data = {
+        "mcpServers": {
+            "a": {"command": "node", "args": ["same.js"]},
+            "b": {"command": "node", "args": ["same.js"]},
+        }
+    }
+    servers, _ = inventory([("generic", write_config(tmp_path, json.dumps(data)))], tmp_path)
+    for server in servers:
+        assert "repeated_endpoint_not_proof_of_duplicate_loading" in server.notes
+        # Same transport, so the proxy-specific note must not be attached.
+        assert "same_backend_reached_through_different_transports" not in server.notes
