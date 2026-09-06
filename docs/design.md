@@ -18,6 +18,9 @@ Files/scopes remain independent. A global entry and project entry with the same 
 
 | Field | Definition | Interpretation |
 |---|---|---|
+| always_loaded_tokens | Encoded advertised tool names | Floor across loading modes; excludes host framing and separators |
+| always_loaded_basis | Whether names were counted bare or host-qualified | Qualified only where the convention is verified, never guessed |
+| detail | `definitions` or `names_only` | A reduced capture measures the floor and leaves the ceiling null |
 | instructions_tokens | Encoded server instructions | Host may trim, omit or present differently |
 | core_tools_tokens | Canonical JSON array of selected name, description, inputSchema | Hypothetical eager model-facing surface |
 | eager_projection_tokens | core_tools_tokens + instructions_tokens | Scenario only; neither bound on host usage |
@@ -26,6 +29,12 @@ Files/scopes remain independent. A global entry and project entry with the same 
 | configured_output_token_limit | Declared per-tool policy, when present | Not a measured response or verified enforcement |
 | fingerprint | SHA-256 of sorted selected definitions plus instructions | Contract drift, not a malware verdict |
 | runtime_output_tokens | null | Discovery cannot measure future tool output |
+
+A capture whose tools all lack `inputSchema` is measured as `names_only`: the floor is
+reported and every schema-derived field is `null`, never `0`. A capture where only some
+tools carry a schema is malformed rather than reduced and is still rejected. A group
+containing a floor-only server reports `projection_complete: false`, because its ceiling
+is a partial sum.
 
 `o200k_base` is the default named tokenizer proxy. `cl100k_base` is available for comparison. Neither is presented as Claude's actual tokenizer. Canonical serialization does not reproduce hidden provider framing or host conversion. Empty arrays still have serialization overhead.
 

@@ -24,6 +24,8 @@ COVERAGE = [
     "Use --config for a trusted exported/merged inventory or an explicit plugin .mcp.json.",
 ]
 METHOD = [
+    "Always loaded counts the advertised tool names only; a host carries them in every loading mode.",
+    "It is a floor, not a total: host framing, separators and built-in instructions are not included.",
     "Eager projection counts canonical JSON of selected name/description/inputSchema plus instructions.",
     "Selected wire catalog separately includes outputSchema, annotations and metadata; hosts may omit them.",
     "This is neither a lower bound nor an upper bound for actual host context usage.",
@@ -138,7 +140,13 @@ async def scan(args) -> dict:
         else:
             try:
                 capture = await probe(server, args.timeout, args.max_pages)
-                row["measurement"] = analyze(capture, server.config, counter, args.include_names)
+                row["measurement"] = analyze(
+                    capture,
+                    server.config,
+                    counter,
+                    args.include_names,
+                    server.tool_name_prefix,
+                )
                 row["protocol_version"] = capture["protocol_version"]
             except Exception as exc:
                 row["measurement"] = {"status": error_code(exc)}
@@ -166,19 +174,33 @@ def finalize(report: dict, args) -> dict:
                 "id": row["group"],
                 "measured_servers": 0,
                 "unmeasured_enabled_servers": 0,
+                "floor_only_servers": 0,
+                "always_loaded_tokens": 0,
                 "tokens": 0,
             },
         )
         m = row["measurement"]
         if m["status"] == "measured":
             g["measured_servers"] += 1
-            g["tokens"] += m["eager_projection_tokens"]
+            g["always_loaded_tokens"] += m["always_loaded_tokens"]
+            if m["eager_projection_tokens"] is None:
+                g["floor_only_servers"] += 1
+            else:
+                g["tokens"] += m["eager_projection_tokens"]
         elif row["enabled"]:
             g["unmeasured_enabled_servers"] += 1
     for group in groups.values():
         group["complete"] = group["unmeasured_enabled_servers"] == 0
+        # A group holding a floor-only server has no complete ceiling, so its
+        # projection is a partial sum and must not be read as the group total.
+        group["projection_complete"] = group["complete"] and group["floor_only_servers"] == 0
         if args.context_window and group["measured_servers"]:
-            group["budget"] = budget(group["tokens"], args.context_window, args.reserve)
+            group["budget"] = budget(
+                group["tokens"],
+                args.context_window,
+                args.reserve,
+                group["always_loaded_tokens"],
+            )
     report["groups"] = list(groups.values())
     invalid = any(s["status"] == "unreadable_or_invalid" for s in report.get("sources", []))
     missing_explicit = bool(getattr(args, "config", [])) and any(
@@ -207,20 +229,28 @@ def markdown(report: dict) -> str:
             .replace("`", "'")
         )
 
+    def cell(value):
+        return "unknown" if value is None else value
+
     lines = [
         "# MCP Context Doctor",
         "",
         f"Mode: {report['mode']} | Encoding: {report['encoding']}",
         "",
-        "Actual host context usage: **unknown**. Token figures below are eager-loading projections.",
+        "**Always loaded** counts the advertised tool names, which a host carries whether or",
+        "not it has loaded the definitions. It is a floor. **Eager projection** adds every",
+        "description and input schema, which only a host that loads them all pays. Actual host",
+        "context usage is **unknown** and lies between them.",
         "",
-        "| Server | Host | Status | Selected tools | Projected tokens |",
-        "|---|---|---|---:|---:|",
+        "| Server | Host | Status | Selected tools | Always loaded | Eager projection |",
+        "|---|---|---|---:|---:|---:|",
     ]
     for row in report["servers"]:
         m = row["measurement"]
         lines.append(
-            f"| {safe(row.get('name', row['id']))} | {row['host']} | {m['status']} | {m.get('selected_tools', '-')} | {m.get('eager_projection_tokens', '-')} |"
+            f"| {safe(row.get('name', row['id']))} | {row['host']} | {m['status']} "
+            f"| {m.get('selected_tools', '-')} | {cell(m.get('always_loaded_tokens', '-'))} "
+            f"| {cell(m.get('eager_projection_tokens', '-'))} |"
         )
     lines += ["", "## Findings", ""]
     for source in report.get("sources", []):
@@ -235,14 +265,23 @@ def markdown(report: dict) -> str:
         if findings:
             lines.append(f"- {row['id']}: {', '.join(findings)}")
         for tool in row["measurement"].get("tools", [])[:5]:
+            cost = (
+                f"{tool['definition_tokens']} definition tokens"
+                if tool["definition_tokens"] is not None
+                else f"{tool['always_loaded_tokens']} name tokens; definition unmeasured"
+            )
             lines.append(
-                f"- {row['id']} / {safe(tool.get('name', tool['id']))}: {tool['definition_tokens']} definition tokens; "
+                f"- {row['id']} / {safe(tool.get('name', tool['id']))}: {cost}; "
                 + (", ".join(tool["findings"]) or "no heuristic finding")
             )
     for g in report["groups"]:
         if b := g.get("budget"):
             lines.append(
-                f"- {g['id']}: {b['percent_of_window']}% of supplied window; projected headroom {b['remaining_in_projection']} tokens; collection complete: {g['complete']}."
+                f"- {g['id']}: floor {b['always_loaded_tokens']} tokens "
+                f"({b['floor_percent_of_window']}% of supplied window); "
+                f"eager projection {b['percent_of_window']}%, headroom "
+                f"{b['remaining_in_projection']} tokens; collection complete: {g['complete']}; "
+                f"projection complete: {g['projection_complete']}."
             )
     lines += ["", "## Interpretation and coverage", ""]
     lines += ["- " + item for item in report["methodology"] + report.get("coverage", [])]

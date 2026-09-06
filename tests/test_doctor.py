@@ -159,8 +159,8 @@ def test_reject_incomplete_or_invalid_capture(patch):
 
 
 def test_inspector_envelope():
-    tools, instructions = validate_capture({"result": {"tools": CAPTURE["tools"]}})
-    assert len(tools) == 2 and instructions == ""
+    tools, instructions, detail = validate_capture({"result": {"tools": CAPTURE["tools"]}})
+    assert len(tools) == 2 and instructions == "" and detail == "definitions"
 
 
 def test_drift_detects_schema_edit_but_not_order(counter):
@@ -419,3 +419,130 @@ def test_name_selector_matching_multiple_scopes_is_reported(tmp_path):
     report = anyio.run(scan, args)
     assert len(report["servers"]) == 2
     assert "name_selector_matched_multiple_scopes" in report["coverage"]
+
+
+NAMES_ONLY = {
+    "instructions": "",
+    "tools": [
+        {"name": "search", "description": "Search records."},
+        {"name": "read", "description": "Read a record."},
+    ],
+}
+
+
+def test_names_only_capture_measures_the_floor_and_leaves_the_ceiling_unknown(counter):
+    # A catalog reachable only in reduced form still pins the always-loaded cost.
+    m = analyze(NAMES_ONLY, {}, counter)
+    assert m["detail"] == "names_only"
+    assert m["selected_tools"] == 2
+    assert m["always_loaded_tokens"] == counter.text("search") + counter.text("read")
+    assert "definitions_unavailable_floor_only" in m["findings"]
+    # Unmeasured is unknown, never zero: a reduced capture is not a free server.
+    for field in ("eager_projection_tokens", "core_tools_tokens", "selected_wire_catalog_tokens"):
+        assert m[field] is None, field
+    for tool in m["tools"]:
+        assert tool["definition_tokens"] is None
+        assert tool["input_schema_tokens"] is None
+        assert tool["always_loaded_tokens"] > 0
+
+
+def test_capture_missing_schemas_on_only_some_tools_is_rejected(counter):
+    # Reduced is acceptable; inconsistent is malformed and must not be measured.
+    mixed = {
+        "instructions": "",
+        "tools": [
+            CAPTURE["tools"][0],
+            {"name": "read", "description": "Read a record."},
+        ],
+    }
+    with pytest.raises(ValueError):
+        validate_capture(mixed)
+
+
+def test_floor_is_measured_with_the_host_name_convention(counter):
+    bare = analyze(CAPTURE, {}, counter)
+    qualified = analyze(CAPTURE, {}, counter, name_prefix="mcp__brain__")
+    assert bare["always_loaded_basis"] == "bare_names"
+    assert qualified["always_loaded_basis"] == "qualified_names"
+    assert qualified["always_loaded_tokens"] > bare["always_loaded_tokens"]
+    # The prefix changes only the floor; the definitions are unchanged.
+    assert qualified["eager_projection_tokens"] == bare["eager_projection_tokens"]
+
+
+def test_only_claude_hosts_declare_a_known_name_convention():
+    cfg = {"command": "node", "args": ["s.js"]}
+    assert Server("brain", cfg, "s", "claude-code").tool_name_prefix == "mcp__brain__"
+    assert Server("brain", cfg, "s", "claude-desktop").tool_name_prefix == "mcp__brain__"
+    # An unverified convention would put a fabricated number in the floor.
+    for host in ("codex", "cursor", "vscode", "generic"):
+        assert Server("brain", cfg, "s", host).tool_name_prefix is None
+
+
+def test_floor_only_server_does_not_silently_complete_a_group_projection(counter):
+    args = SimpleNamespace(context_window=100000, reserve=0)
+    report = {
+        "servers": [
+            {
+                "group": "g",
+                "enabled": True,
+                "measurement": analyze(CAPTURE, {}, counter),
+            },
+            {
+                "group": "g",
+                "enabled": True,
+                "measurement": analyze(NAMES_ONLY, {}, counter),
+            },
+        ]
+    }
+    finalize(report, args)
+    g = report["groups"][0]
+    assert g["measured_servers"] == 2
+    assert g["floor_only_servers"] == 1
+    # Every measured server contributes a floor, so the floor total is complete.
+    assert g["always_loaded_tokens"] > 0
+    # The ceiling is a partial sum and must be labelled as one.
+    assert g["complete"] is True
+    assert g["projection_complete"] is False
+    assert g["budget"]["always_loaded_tokens"] == g["always_loaded_tokens"]
+
+
+def test_diff_falls_back_to_the_floor_when_a_ceiling_is_unmeasured(counter):
+    def report(measurement):
+        return {
+            "schema_version": 1,
+            "encoding": "o200k_base",
+            "servers": [{"id": "s", "measurement": measurement}],
+        }
+
+    full = analyze(CAPTURE, {}, counter)
+    reduced = analyze(NAMES_ONLY, {}, counter)
+    both_full = compare(report(full), report(full))
+    assert both_full["changes"][0]["basis"] == "eager_projection_tokens"
+    assert both_full["changes"][0]["token_delta"] == 0
+    # Subtracting a measured ceiling from a null one would raise; fall back instead.
+    mixed = compare(report(full), report(reduced))
+    assert mixed["changes"][0]["basis"] == "always_loaded_tokens"
+    assert isinstance(mixed["changes"][0]["token_delta"], int)
+
+
+def test_report_names_the_floor_and_prints_unknown_for_an_unmeasured_ceiling(counter):
+    report = {
+        "mode": "offline-capture",
+        "encoding": "o200k_base",
+        "servers": [
+            {
+                "id": "server-x",
+                "host": "generic",
+                "findings": [],
+                "measurement": analyze(NAMES_ONLY, {}, counter),
+            }
+        ],
+        "groups": [],
+        "methodology": [],
+        "sources": [],
+    }
+    rendered = markdown(report)
+    assert "Always loaded" in rendered
+    # The ceiling column must read unknown, not 0, for a floor-only measurement.
+    assert "| unknown |" in rendered
+    assert rendered.isascii()

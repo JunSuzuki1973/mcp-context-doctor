@@ -4,16 +4,17 @@ Local MCP inventory and tool-definition token diagnostics, with a portable Agent
 
 [日本語](README.ja.md) · [Design](docs/design.md) · [Existing tools](docs/existing-tools.md) · [Security](SECURITY.md)
 
-Connecting many MCP servers can consume context, but server count alone does not tell you how much. This CLI measures advertised definitions and labels the result as an **eager-loading projection**, not actual host usage or an overflow prediction. Hosts with Tool Search can load only a subset.
+Connecting many MCP servers can consume context, but server count alone does not tell you how much. Hosts that defer tool loading carry the advertised **names** and fetch a definition only when it is used, so a catalog's cost is a range, not a number. This CLI reports both ends: **always loaded** (the names, a floor) and the **eager projection** (every description and input schema, a ceiling). Actual host usage lies between them and is not measured.
 
 ```text
-MCP Context Doctor · example catalog · o200k_base
+MCP Context Doctor | example catalog | o200k_base
 Advertised tools        2
 Selected tools          2
+Always loaded           4 tokens   <- floor, paid in every loading mode
 Core definitions      100 tokens
 Server instructions    12 tokens
-Eager projection      112 tokens
-Actual host usage     unknown
+Eager projection      112 tokens   <- ceiling, only if the host loads them all
+Actual host usage     unknown      <- lies between the two
 ```
 
 Uses the official MCP Python SDK and tiktoken. The official MCP Inspector independently checks the integration fixture. No LLM API key is required, and the doctor never calls business tools.
@@ -81,7 +82,7 @@ The example window is an illustrative budget, not a claimed model specification.
 | VS Code | User/project `mcp.json`, JSON comments/trailing commas, `${workspaceFolder}`/`${userHome}` |
 | Other hosts / plugins | Explicit `--config` with `mcpServers`, `servers`, or `mcp_servers` mapping |
 | Live transport | STDIO and Streamable HTTP, static/environment headers |
-| Offline capture | Raw `tools/list` or Inspector JSON envelope |
+| Offline capture | Raw `tools/list` or Inspector JSON envelope; a names-only catalog measures the floor |
 | Schemas | Validation and separate input/output schema counts |
 | Comparison | Stable fingerprints, token deltas, unknown-state handling |
 
@@ -105,7 +106,8 @@ GitHub releases include `mcp-context-doctor-skill.zip`. Cursor/VS Code configura
 
 ## Interpret results
 
-- `eager_projection_tokens`: selected names/descriptions/input schemas plus server instructions, measured as canonical JSON/text.
+- `always_loaded_tokens`: the advertised tool names. A host carries these whether or not it has loaded the definitions, so this is a floor that holds under deferred loading. It is not a total: host framing, separators and built-in instructions are excluded. `always_loaded_basis` says whether names were counted bare or with the host's `mcp__<server>__` prefix, which is applied only for hosts whose convention is verified.
+- `eager_projection_tokens`: selected names/descriptions/input schemas plus server instructions, measured as canonical JSON/text. This is the ceiling, and it is `null` when the capture carried no input schemas.
 - `selected_wire_catalog_tokens`: catalog including output schemas and metadata. This overlaps the first metric; **do not add them**.
 - `runtime_output_tokens: null`: tool output is unmeasured; large responses can dominate context even with small definitions.
 - Named tokenizer proxies (`o200k_base`, `cl100k_base`) are not exact Claude counts or provider usage reports.

@@ -58,6 +58,18 @@ class Server:
         return "config-" + identity(self.source + "\0" + self.scope)
 
     @property
+    def tool_name_prefix(self) -> str | None:
+        """Prefix a host prepends to every advertised tool name, when it is known.
+
+        Verified for the Claude hosts, which expose `mcp__<server>__<tool>`. Other
+        hosts are left unprefixed rather than guessed: an invented convention would
+        put a fabricated number in the floor.
+        """
+        if self.host in ("claude-code", "claude-desktop"):
+            return f"mcp__{self.name}__"
+        return None
+
+    @property
     def transport(self) -> str:
         kind = self.config.get("type", "")
         if "url" in self.config and "command" in self.config:
