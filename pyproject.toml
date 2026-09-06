@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mcp-context-doctor"
+version = "0.1.0"
+description = "Local MCP inventory and context-budget diagnostics, with a portable Agent Skill"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = ["mcp>=2.1.1,<3", "tiktoken>=0.9,<1", "json5>=0.12,<1", "jsonschema>=4.23,<5"]
+
+[project.scripts]
+mcp-context-doctor = "mcp_context_doctor.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.12,<1", "build>=1.2,<2", "pyyaml>=6,<7"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcp_context_doctor"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

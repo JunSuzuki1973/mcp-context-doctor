@@ -1,0 +1,27 @@
+{
+  "instructions": "Search records before fetching a specific result. Use bounded queries.",
+  "tools": [
+    {
+      "name": "search_records",
+      "description": "Search records by query. Return at most limit matching records.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string", "description": "Search terms"},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 50}
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "get_record",
+      "description": "Fetch one record using its identifier.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {"id": {"type": "string"}},
+        "required": ["id"]
+      },
+      "outputSchema": {"type": "object", "properties": {"title": {"type": "string"}}}
+    }
+  ]
+}
