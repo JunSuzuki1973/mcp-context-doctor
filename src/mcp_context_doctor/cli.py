@@ -14,6 +14,7 @@ import anyio
 
 from . import __version__
 from .config import Server, candidates, inventory, read_data
+from .diagnose import diagnose
 from .measure import Counter, analyze, budget, compare
 from .probe import error_code, probe
 
@@ -206,6 +207,7 @@ def finalize(report: dict, args) -> dict:
     missing_explicit = bool(getattr(args, "config", [])) and any(
         s["status"] == "not_found" for s in report.get("sources", [])
     )
+    report["diagnosis"] = diagnose(report)
     report["collection_complete"] = (
         not invalid
         and not missing_explicit
@@ -232,9 +234,39 @@ def markdown(report: dict) -> str:
     def cell(value):
         return "unknown" if value is None else value
 
-    lines = [
-        "# MCP Context Doctor",
-        "",
+    lines = ["# MCP Context Doctor", ""]
+    if d := report.get("diagnosis"):
+        c = d["coverage"]
+        headline = {
+            "review_recommended": f"Review recommended -- {len(d['items'])} items",
+            "no_findings_in_measured_scope": "No findings in the measured scope",
+            "nothing_measured": "Nothing was measured",
+        }[d["verdict"]]
+        lines += [
+            f"## {headline}",
+            "",
+            f"Measured {c['measured_servers']} of {c['enabled_servers']} enabled servers. "
+            + (
+                "Coverage is complete."
+                if c["complete"]
+                else f"{c['unmeasured_enabled_servers']} were not measured, so no total "
+                "below is complete."
+            ),
+            "",
+        ]
+        if c["measured_servers"]:
+            lines += [
+                f"Always loaded across measured servers: "
+                f"**{d['always_loaded_tokens']} tokens**. This is the floor a host carries "
+                "in every loading mode.",
+                "",
+            ]
+        for index, item in enumerate(d["items"], start=1):
+            where = safe(item["server_name"] or item["server"] or "configuration")
+            cost = f" ({item['impact_tokens']} tokens)" if item["impact_tokens"] else ""
+            lines += [f"{index}. **{where}**{cost} -- {safe(item['action'])}"]
+        lines += [""]
+    lines += [
         f"Mode: {report['mode']} | Encoding: {report['encoding']}",
         "",
         "**Always loaded** counts the advertised tool names, which a host carries whether or",
@@ -252,7 +284,7 @@ def markdown(report: dict) -> str:
             f"| {m.get('selected_tools', '-')} | {cell(m.get('always_loaded_tokens', '-'))} "
             f"| {cell(m.get('eager_projection_tokens', '-'))} |"
         )
-    lines += ["", "## Findings", ""]
+    lines += ["", "## Evidence", ""]
     for source in report.get("sources", []):
         if source["status"] == "unreadable_or_invalid":
             lines.append(

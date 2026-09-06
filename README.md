@@ -104,6 +104,41 @@ Claude Code example: `/mcp-context-doctor Diagnose this project's MCP context co
 
 GitHub releases include `mcp-context-doctor-skill.zip`. Cursor/VS Code configuration support does not imply every edition supports the same Skill installation path.
 
+## What the report says
+
+Reports open with a verdict, the coverage it rests on, and the items worth acting on,
+ordered by measured impact:
+
+```text
+## Review recommended -- 2 items
+
+Measured 2 of 5 enabled servers. 3 were not measured, so no total below is complete.
+
+Always loaded across measured servers: 326 tokens. This is the floor a host carries
+in every loading mode.
+
+1. blender (2575 tokens) -- 7 of 28 tools carry 43% of this server's definitions. If
+   they are not used, excluding them in the host's tool filter removes about 2575
+   tokens from an eager load.
+2. configuration -- 3 enabled servers were not measured (auth_required). Their cost is
+   unknown, not zero, so no total here is complete. ...
+```
+
+Every item is derived only from what this run measured, so each holds without knowing
+the host's loading mode, history or which tools you actually use:
+
+| Item | Basis |
+|---|---|
+| `definition_cost_concentrated_in_few_tools` | A minority of tools carries most of a server's definitions, and a host tool filter can act on exactly that minority |
+| `tool_description_far_above_median` | Relative to the median of everything measured in this run |
+| `one_backend_configured_more_than_once` | Endpoints compared after normalization, including through proxy wrappers |
+| `enabled_servers_not_measured` | Coverage; the advice differs by reason (`not_probed` vs `auth_required`) |
+| `tools_without_a_description` | The model has only the name to select on |
+
+Thresholds are review heuristics, named as constants in `diagnose.py`, not limits
+derived from any model or host. **No item asserts that a context window will overflow**,
+and `nothing_measured` is never a clean bill of health.
+
 ## Interpret results
 
 - `always_loaded_tokens`: the advertised tool names. A host carries these whether or not it has loaded the definitions, so this is a floor that holds under deferred loading. It is not a total: host framing, separators and built-in instructions are excluded. `always_loaded_basis` says whether names were counted bare or with the host's `mcp__<server>__` prefix, which is applied only for hosts whose convention is verified.

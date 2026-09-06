@@ -21,6 +21,7 @@ from mcp_context_doctor.config import (
     proxied_endpoint,
     read_data,
 )
+from mcp_context_doctor.diagnose import diagnose
 from mcp_context_doctor.measure import Counter, analyze, budget, compare, validate_capture
 from mcp_context_doctor.probe import ProbeLimit, collect, prepare, probe
 
@@ -631,3 +632,164 @@ def test_identical_stdio_commands_still_group_without_a_url(tmp_path):
         assert "repeated_endpoint_not_proof_of_duplicate_loading" in server.notes
         # Same transport, so the proxy-specific note must not be attached.
         assert "same_backend_reached_through_different_transports" not in server.notes
+
+
+def wide_capture(count, big=0):
+    """A catalog of `count` cheap tools, the first `big` of them expensive."""
+    tools = []
+    for i in range(count):
+        words = 200 if i < big else 2
+        tools.append(
+            {
+                "name": f"tool_{i:02d}",
+                # Distinct wording per tool: identical descriptions are their own finding.
+                "description": f"tool {i} " + " ".join(["word"] * words),
+                "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}},
+            }
+        )
+    return {"instructions": "", "tools": tools}
+
+
+def row(measurement, **kw):
+    base = {
+        "id": kw.get("id", "server-x"),
+        "host": kw.get("host", "generic"),
+        "enabled": kw.get("enabled", True),
+        "findings": kw.get("findings", []),
+        "measurement": measurement,
+    }
+    if "name" in kw:
+        base["name"] = kw["name"]
+    return base
+
+
+def test_verdict_states_coverage_and_never_implies_more_than_was_measured(counter):
+    d = diagnose(
+        {
+            "servers": [
+                row(analyze(CAPTURE, {}, counter), id="a"),
+                row({"status": "auth_required"}, id="b"),
+            ]
+        }
+    )
+    assert d["verdict"] == "review_recommended"
+    assert d["coverage"] == {
+        "measured_servers": 1,
+        "enabled_servers": 2,
+        "unmeasured_enabled_servers": 1,
+        "complete": False,
+    }
+    codes = [i["code"] for i in d["items"]]
+    assert "enabled_servers_not_measured" in codes
+    # No item may assert an overflow; that is the claim the tool refuses to make.
+    assert not any("overflow" in json.dumps(i).lower() for i in d["items"])
+
+
+def test_nothing_measured_is_not_a_clean_bill_of_health(counter):
+    d = diagnose({"servers": [row({"status": "not_probed"}, id="a")]})
+    assert d["verdict"] == "nothing_measured"
+    assert d["always_loaded_tokens"] == 0
+    assert d["coverage"]["complete"] is False
+
+
+def test_clean_measured_scope_reports_no_findings(counter):
+    d = diagnose({"servers": [row(analyze(wide_capture(6), {}, counter), id="a")]})
+    assert d["verdict"] == "no_findings_in_measured_scope"
+    assert d["items"] == []
+    assert d["coverage"]["complete"] is True
+
+
+def test_concentration_fires_only_when_a_minority_carries_the_cost(counter):
+    # 2 of 20 tools hold most of the definitions: a filter can act on exactly those.
+    skewed = diagnose({"servers": [row(analyze(wide_capture(20, big=2), {}, counter), id="a")]})
+    item = next(
+        i for i in skewed["items"] if i["code"] == "definition_cost_concentrated_in_few_tools"
+    )
+    assert item["evidence"]["tools"] <= 2
+    assert item["impact_tokens"] > 0
+    assert "tool filter" in item["action"]
+    # Cost spread evenly is not a finding: there is no minority to exclude.
+    flat = diagnose({"servers": [row(analyze(wide_capture(20), {}, counter), id="a")]})
+    assert not any(i["code"] == "definition_cost_concentrated_in_few_tools" for i in flat["items"])
+
+
+def test_description_outlier_is_relative_to_the_measured_distribution(counter):
+    d = diagnose({"servers": [row(analyze(wide_capture(12, big=1), {}, counter), id="a")]})
+    item = next(i for i in d["items"] if i["code"] == "tool_description_far_above_median")
+    assert item["evidence"]["multiple"] >= 5
+    assert item["evidence"]["median_description_tokens"] > 0
+    # Too small a sample has no meaningful median, so the rule stays silent.
+    tiny = diagnose({"servers": [row(analyze(CAPTURE, {}, counter), id="a")]})
+    assert not any(i["code"] == "tool_description_far_above_median" for i in tiny["items"])
+
+
+def test_repeated_backend_is_reported_once_for_the_configuration(counter):
+    shared = ["repeated_endpoint_not_proof_of_duplicate_loading"]
+    d = diagnose(
+        {
+            "servers": [
+                row({"status": "not_probed"}, id="a", findings=shared),
+                row({"status": "not_probed"}, id="b", findings=shared),
+            ]
+        }
+    )
+    items = [i for i in d["items"] if i["code"] == "one_backend_configured_more_than_once"]
+    assert len(items) == 1
+    assert items[0]["evidence"]["entries"] == 2
+    # The wording must not claim one host double-loads it.
+    assert "not proof" in items[0]["action"]
+
+
+def test_unmeasured_advice_matches_the_reason(counter):
+    static = diagnose({"servers": [row({"status": "not_probed"}, id="a")]})
+    assert "--live" in static["items"][0]["action"]
+    assert "token" not in static["items"][0]["action"]
+    auth = diagnose({"servers": [row({"status": "auth_required"}, id="a")]})
+    assert "token" in auth["items"][0]["action"]
+    assert "--live" not in auth["items"][0]["action"]
+
+
+def test_items_are_ordered_by_measured_impact(counter):
+    d = diagnose(
+        {
+            "servers": [
+                row(analyze(wide_capture(20, big=2), {}, counter), id="a"),
+                row({"status": "auth_required"}, id="b"),
+            ]
+        }
+    )
+    impacts = [i["impact_tokens"] for i in d["items"]]
+    assert impacts == sorted(impacts, reverse=True)
+
+
+def test_report_leads_with_the_verdict(counter):
+    report = {
+        "mode": "live-discovery",
+        "encoding": "o200k_base",
+        "servers": [row(analyze(wide_capture(20, big=2), {}, counter), id="a", name="brain")],
+        "groups": [],
+        "methodology": [],
+        "sources": [],
+    }
+    report["diagnosis"] = diagnose(report)
+    rendered = markdown(report)
+    head = rendered.splitlines()[2]
+    assert head.startswith("## Review recommended")
+    assert rendered.index("Review recommended") < rendered.index("Mode:")
+    assert rendered.isascii()
+
+
+def test_floor_line_is_omitted_when_nothing_was_measured(counter):
+    report = {
+        "mode": "static",
+        "encoding": "o200k_base",
+        "servers": [row({"status": "not_probed"}, id="a")],
+        "groups": [],
+        "methodology": [],
+        "sources": [],
+    }
+    report["diagnosis"] = diagnose(report)
+    rendered = markdown(report)
+    # "0 tokens" next to a floor label reads as a measured zero. Say nothing instead.
+    assert "Always loaded across measured servers" not in rendered
+    assert "Nothing was measured" in rendered
