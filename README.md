@@ -59,6 +59,23 @@ Measure selected trusted servers. Use a server ID from the static report, or its
 mcp-context-doctor scan --host claude-code --project /path/to/project --live --server my-server
 ```
 
+Measure a server behind an authenticating endpoint. The flag takes a variable
+**name**, never a token, and applies to this run only:
+
+```sh
+export GBRAIN_TOKEN=...
+mcp-context-doctor scan --host claude-code --project /path --live \
+  --server my-remote-server --bearer-env GBRAIN_TOKEN
+```
+
+The same can be stored in the server's config entry instead, as `bearer_token_env_var`
+(a variable name holding the token) or `env_http_headers` (a header-name to
+variable-name mapping). The doctor performs no OAuth flow and reads no credential
+store, so a host that authenticated interactively holds a token the doctor cannot see.
+When no token is available, export the catalog from an already-authenticated client and
+pass it to `analyze`: a catalog carrying only tool names still measures the
+always-loaded floor.
+
 `--live` starts configured local commands or connects to remote URLs. Package launchers can download code; servers can have startup effects. Review the target first. Omitting `--server` selects every enabled server in the chosen configs. The doctor performs discovery, not `tools/call`.
 
 Analyze an existing **complete** MCP Inspector export without connecting:
@@ -81,7 +98,7 @@ The example window is an illustrative budget, not a claimed model specification.
 | Cursor | User/project `.cursor/mcp.json` |
 | VS Code | User/project `mcp.json`, JSON comments/trailing commas, `${workspaceFolder}`/`${userHome}` |
 | Other hosts / plugins | Explicit `--config` with `mcpServers`, `servers`, or `mcp_servers` mapping |
-| Live transport | STDIO and Streamable HTTP, static/environment headers |
+| Live transport | STDIO and Streamable HTTP, static/environment headers, `--bearer-env` |
 | Offline capture | Raw `tools/list` or Inspector JSON envelope; a names-only catalog measures the floor |
 | Schemas | Validation and separate input/output schema counts |
 | Comparison | Stable fingerprints, token deltas, unknown-state handling |

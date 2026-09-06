@@ -98,6 +98,16 @@ def parser() -> argparse.ArgumentParser:
                 default=[],
                 help="Exact name or report ID; repeatable. Use with --live to limit scope.",
             )
+            cmd.add_argument(
+                "--bearer-env",
+                metavar="NAME",
+                help=(
+                    "Read a bearer token from this environment variable for the selected "
+                    "HTTP servers, for this run only. Takes the variable name, never a "
+                    "token. Diagnosing an authenticating endpoint should not require "
+                    "editing the host's own configuration."
+                ),
+            )
             cmd.add_argument("--timeout", type=positive, default=20)
             cmd.add_argument("--max-pages", type=positive, default=50)
         else:
@@ -144,6 +154,12 @@ async def scan(args) -> dict:
         elif not args.live:
             row["measurement"] = {"status": "not_probed"}
         else:
+            if args.bearer_env and server.transport == "http":
+                # Applied to this run's in-memory copy; the stored config is untouched
+                # and the value itself never reaches the report.
+                server.config = dict(server.config)
+                server.config["bearer_token_env_var"] = args.bearer_env
+                row["findings"].append("auth_supplied_from_command_line")
             try:
                 capture = await probe(server, args.timeout, args.max_pages)
                 row["measurement"] = analyze(

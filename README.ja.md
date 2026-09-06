@@ -40,6 +40,15 @@ mcp-context-doctor scan --host claude-code --project 'C:\work\my-project' --form
 mcp-context-doctor scan --host codex --project 'C:\work\my-project' --live --server my-server
 ```
 
+認証が必要なエンドポイントを測定する場合は `--bearer-env` を使います。渡すのは**環境変数名**であってトークン本体ではありません（コマンドラインに書くとシェル履歴とプロセス一覧に残るため）。この指定はその実行限りで、設定ファイルは書き換えません。
+
+```powershell
+$env:GBRAIN_TOKEN = '...'
+mcp-context-doctor scan --host claude-code --project 'C:\work\p' --live --server my-server --bearer-env GBRAIN_TOKEN
+```
+
+設定ファイル側に書く場合は `bearer_token_env_var`（トークンを保持する環境変数名）または `env_http_headers`（ヘッダー名→環境変数名の対応）が使えます。Doctor は OAuth フローを実行せず、資格情報ストアも読みません。したがって、ホストが対話的に認証して保持しているトークンは Doctor からは見えません。トークンが用意できない場合は、認証済みクライアントからカタログをエクスポートして `analyze` に渡してください。ツール名だけのカタログでも always-loaded の下限は測定できます。
+
 `--server`には設定名または静的レポートのIDを使えます。`--live`は設定されたプログラムを起動したりURLへ接続します。サーバーの起動自体に副作用はあり得ますが、Doctorは業務ツールを呼び出しません。`--server`を省略すると、選択した設定の有効サーバーすべてが対象です。
 
 保存済みデータの解析・差分比較:

@@ -155,9 +155,11 @@ def _coverage(servers: list[dict]) -> list[dict]:
                 "and a --server selection to measure the ones you trust."
             ),
             "auth_required": (
-                "The endpoint rejected an unauthenticated request. Supply a token through "
-                "the config's referenced environment variable, or export the catalog from "
-                "an already-authenticated client and pass it to analyze."
+                "The endpoint rejected an unauthenticated request. Pass --bearer-env NAME "
+                "to read a token from that environment variable for this run, set "
+                "bearer_token_env_var or env_http_headers in the config, or export the "
+                "catalog from an already-authenticated client and analyze that. A catalog "
+                "carrying only names still measures the always-loaded floor."
             ),
             "timeout": "The server did not answer in time. Raise --timeout or start it first.",
             "command_not_found": "The configured command is not on PATH from this shell.",
