@@ -2,7 +2,7 @@
 
 Local MCP inventory and tool-definition token diagnostics, with a portable Agent Skill for **Codex, Claude Code, Cursor, VS Code, and other skill-compatible agents**.
 
-[日本語](README.ja.md) · [Design](docs/design.md) · [Existing tools](docs/existing-tools.md) · [Security](SECURITY.md)
+[日本語](README.ja.md) · [Worked run](docs/example-run.md) · [Design](docs/design.md) · [Existing tools](docs/existing-tools.md) · [Security](SECURITY.md)
 
 Connecting many MCP servers can consume context, but server count alone does not tell you how much. Hosts that defer tool loading carry the advertised **names** and fetch a definition only when it is used, so a catalog's cost is a range, not a number. This CLI reports both ends: **always loaded** (the names, a floor) and the **eager projection** (every description and input schema, a ceiling). Actual host usage lies between them and is not measured.
 
@@ -121,6 +121,9 @@ Codex example: `Use $mcp-context-doctor to inspect this project's MCP configurat
 Claude Code example: `/mcp-context-doctor Diagnose this project's MCP context cost.`
 
 GitHub releases include `mcp-context-doctor-skill.zip`. Cursor/VS Code configuration support does not imply every edition supports the same Skill installation path.
+
+A full run against a real four-host machine, with every figure it produced, is in
+[docs/example-run.md](docs/example-run.md).
 
 ## What the report says
 

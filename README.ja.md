@@ -2,7 +2,7 @@
 
 MCP設定を調べ、ツール定義によるコンテキスト負荷をローカルで計測するCLIと汎用Skillです。Codex、Claude Code、Cursor、VS Codeの設定に対応します。
 
-[English](README.md) · [設計](docs/design.md) · [既存ツールの活用](docs/existing-tools.md)
+[English](README.md) · [実行例](docs/example-run.md) · [設計](docs/design.md) · [既存ツールの活用](docs/existing-tools.md)
 
 接続数だけで危険度を判定しません。ツールを遅延ロードするホストは、ツール**名**だけを常に保持し、定義は使う時に取得します。そのためカタログのコストは単一の数値ではなく幅を持ちます。本ツールはその両端を報告します — **always loaded**（名前のみ＝下限）と **eager projection**（全説明文＋入力スキーマ＝上限）。実際の消費量はこの間にあり、測定しません。会話履歴、ツール出力、組み込み指示も別要因なので、オーバーフロー確率とは表現しません。
 
@@ -66,6 +66,8 @@ mcp-context-doctor diff before.json after.json
 
 - Codex: `$mcp-context-doctor で、このプロジェクトのMCP構成を診断してください`
 - Claude Code: `/mcp-context-doctor このプロジェクトのMCP構成を診断してください`
+
+実際に4ホスト構成のマシンへ実行した結果を、出力そのままで [docs/example-run.md](docs/example-run.md) に記録しています。
 
 ## ロード方式の宣言とツール出力
 

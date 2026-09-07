@@ -1,5 +1,7 @@
 # Design and measurement contract
 
+A recorded run against a real machine is in [example-run.md](example-run.md).
+
 Version 0.2.1 uses a CLI plus an Agent Skill. It does not add another always-connected MCP server.
 
 ## Data flow
